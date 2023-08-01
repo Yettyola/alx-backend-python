@@ -1,58 +1,83 @@
 #!/usr/bin/env python3
-"""A github org client
-"""
-from typing import (
-    List,
-    Dict,
-)
-
-from utils import (
-    get_json,
-    access_nested_map,
-    memoize,
-)
+"""Test for githuborgclient class methods"""
+import unittest
+from parameterized import parameterized, parameterized_class
+from unittest.mock import patch, Mock, PropertyMock
+from utils import access_nested_map, get_json, memoize
+from client import GithubOrgClient
+from fixtures import TEST_PAYLOAD
 
 
-class GithubOrgClient:
-    """A Githib org client
-    """
-    ORG_URL = "https://api.github.com/orgs/{org}"
+class TestGithubOrgClient(unittest.TestCase):
+    """class inheriting unittest for githuborg class"""
+    @parameterized.expand([
+        ("google"),
+        ("abc")
+    ])
+    @patch("client.get_json")
+    def test_org(self, test_orgname, mock_getjson):
+        """tests get_json for org details"""
+        url = "https://api.github.com/orgs/{}".format(test_orgname)
+        example = GithubOrgClient(test_orgname)
+        example.org()
+        mock_getjson.assert_called_once_with(url)
 
-    def __init__(self, org_name: str) -> None:
-        """Init method of GithubOrgClient"""
-        self._org_name = org_name
+    @parameterized.expand([
+        ("google", {"repos_url": "https://api.github.com/orgs/google"})
+     ])
+    def test_public_repos_url(self, test_org, response):
+        """test with the property get mock method"""
+        with patch('client.GithubOrgClient.org',
+                   new_callable=PropertyMock) as tester:
+            tester.return_value = response
+            example = GithubOrgClient(test_org)._public_repos_url
+            self.assertEqual(example, response.get("repos_url"))
 
-    @memoize
-    def org(self) -> Dict:
-        """Memoize org"""
-        return get_json(self.ORG_URL.format(org=self._org_name))
+    @patch("client.get_json")
+    def test_public_repos(self, mocked_getjson):
+        """return a few dict for getjson"""
+        payload = [{"name": "Thirsty"}, {"name": "Hungry"}]
+        mocked_getjson.return_value = payload
 
-    @property
-    def _public_repos_url(self) -> str:
-        """Public repos URL"""
-        return self.org["repos_url"]
+        with patch('client.GithubOrgClient._public_repos_url',
+                   new_callable=PropertyMock) as testit:
+            testit.return_value = "https://api.github.com/orgs/google"
+            example = GithubOrgClient('test').public_repos()
+            self.assertEqual(example, ["Thirsty", "Hungry"])
+            testit.assert_called_once()
+            mocked_getjson.assert_called_once()
 
-    @memoize
-    def repos_payload(self) -> Dict:
-        """Memoize repos payload"""
-        return get_json(self._public_repos_url)
+    @parameterized.expand([
+        ({"license": {"key": "my_license"}}, "my_license", True),
+        ({"license": {"key": "other_license"}}, "my_license", False)
+        ])
+    def test_has_license(self, test_dict, test_key, test_result):
+        """test has license with parameters"""
+        example = GithubOrgClient.has_license(test_dict, test_key)
+        self.assertEqual(example, test_result)
 
-    def public_repos(self, license: str = None) -> List[str]:
-        """Public repos"""
-        json_payload = self.repos_payload
-        public_repos = [
-            repo["name"] for repo in json_payload
-            if license is None or self.has_license(repo, license)
-        ]
 
-        return public_repos
+@parameterized_class(['org_payload', 'repos_payload',
+                      'expected_repos', 'apache2_repos'], TEST_PAYLOAD)
+class TestIntegrationGithubOrgClient(unittest.TestCase):
+    """Integration test"""
+    @classmethod
+    def setUpClass(cls):
+        cls.get_patcher = patch('requests.get', side_effect=[
+            cls.org_payload, cls.repos_payload
+        ])
+        cls.mocked_get = cls.get_patcher.start()
 
-    @staticmethod
-    def has_license(repo: Dict[str, Dict], license_key: str) -> bool:
-        """Static: has_license"""
-        assert license_key is not None, "license_key cannot be None"
-        try:
-            has_license = access_nested_map(repo, ("license", "key")) == license_key
-        except KeyError:
-            return False
-        return has_license
+    @classmethod
+    def tearDownClass(cls):
+        cls.get_patcher.stop()
+
+    def test_public_repos(self):
+        """test public repos """
+
+    def test_public_repos_with_license(self):
+        """test public with license"""
+
+
+if __name__ == '__main__':
+    unittest.main()
